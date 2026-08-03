@@ -6,24 +6,31 @@ import os
 # Initialize Redis client (typically configured centrally).
 redis_client = redis.Redis.from_url(os.getenv("REDIS_URL", "redis://localhost:6379/0"))
 
+CACHE_TTL = 300
+
+
+def revenue_cache_key(property_id: str, tenant_id: str) -> str:
+    return f"revenue:tenant:{tenant_id}:property:{property_id}"
+
+
 async def get_revenue_summary(property_id: str, tenant_id: str) -> Dict[str, Any]:
     """
     Fetches revenue summary, utilizing caching to improve performance.
     """
-    cache_key = f"revenue:{property_id}"
-    
-    # Try to get from cache
+    if not tenant_id:
+        raise ValueError("tenant_id is required to read revenue data")
+
+    cache_key = revenue_cache_key(property_id, tenant_id)
+
     cached = await redis_client.get(cache_key)
     if cached:
         return json.loads(cached)
-    
+
     # Revenue calculation is delegated to the reservation service.
     from app.services.reservations import calculate_total_revenue
-    
-    # Calculate revenue
+
     result = await calculate_total_revenue(property_id, tenant_id)
-    
-    # Cache the result for 5 minutes
-    await redis_client.setex(cache_key, 300, json.dumps(result))
-    
+
+    await redis_client.setex(cache_key, CACHE_TTL, json.dumps(result))
+
     return result
